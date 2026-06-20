@@ -1,209 +1,258 @@
-// server.js - OpenAI to NVIDIA NIM API Proxy (DeepSeek NIM)
+// server.js
+// OpenAI Compatible Proxy -> NVIDIA NIM DeepSeek
 
-const express = require('express');
-const cors = require('cors');
-const axios = require('axios');
+
+const express = require("express");
+const cors = require("cors");
+const axios = require("axios");
+
 
 const app = express();
 
 const PORT = process.env.PORT || 3000;
 
 
+
 // ===============================
 // Middleware
 // ===============================
 
+
 app.use(cors());
 
-// Increase request size limit
-// Fixes Render "Payload Too Large"
+
 app.use(express.json({
-  limit: "50mb"
+
+    limit: "50mb"
+
 }));
 
 
-// Payload error handler
-app.use((err, req, res, next) => {
+// Catch oversized requests
 
-  if (err.type === "entity.too.large") {
-
-    return res.status(413).json({
-
-      error: {
-
-        message:
-          "Request payload too large. Reduce your message size.",
-
-        type:
-          "invalid_request_error"
-
-      }
-
-    });
-
-  }
+app.use((err, req, res, next)=>{
 
 
-  next(err);
+    if(err.type === "entity.too.large") {
+
+
+        return res.status(413).json({
+
+            error: {
+
+                message:
+                "Request payload too large",
+
+                type:
+                "invalid_request_error"
+
+            }
+
+        });
+
+
+    }
+
+
+    next(err);
+
 
 });
 
 
+
+
+
 // ===============================
-// NVIDIA NIM CONFIG
+// NVIDIA CONFIG
 // ===============================
 
+
 const NIM_API_BASE =
-  process.env.NIM_API_BASE ||
-  "https://integrate.api.nvidia.com/v1";
+process.env.NIM_API_BASE ||
+"https://integrate.api.nvidia.com/v1";
 
 
 const NIM_API_KEY =
-  process.env.NIM_API_KEY;
+process.env.NIM_API_KEY;
+
+
+
 
 
 // ===============================
-// DeepSeek SETTINGS
+// SETTINGS
 // ===============================
+
 
 const SHOW_REASONING = false;
+
 
 const ENABLE_THINKING_MODE = true;
 
 
 
+
+
 // ===============================
-// MODEL MAPPING
+// MODEL MAP
 // ===============================
+
 
 const MODEL_MAPPING = {
 
-  "deepseek-v4-pro":
+
+    "deepseek-v4-pro":
     "deepseek-ai/deepseek-v4-pro",
 
 
-  "gpt-4o":
+    "gpt-4o":
     "deepseek-ai/deepseek-v4-pro"
+
 
 };
 
 
 
+
+
 // ===============================
-// Health check
+// Health
 // ===============================
 
-app.get('/health', (req, res) => {
+
+app.get("/health",(req,res)=>{
 
 
-  res.json({
+    res.json({
 
-    status: "ok",
+        status:"ok",
 
-    service:
-      "OpenAI to NVIDIA NIM Proxy",
+        service:
+        "OpenAI NVIDIA NIM Proxy",
 
-    model:
-      "deepseek-ai/deepseek-v4-pro",
+        model:
+        "deepseek-ai/deepseek-v4-pro"
 
-    reasoning_display:
-      SHOW_REASONING,
-
-    thinking_mode:
-      ENABLE_THINKING_MODE
-
-  });
+    });
 
 
 });
 
 
 
+
+
 // ===============================
-// Models endpoint
+// Models
 // ===============================
 
-app.get('/v1/models', (req,res)=>{
+
+app.get("/v1/models",(req,res)=>{
 
 
-  const models =
-    Object.keys(MODEL_MAPPING)
-    .map(model => ({
-
-      id: model,
-
-      object:
-        "model",
-
-      created:
-        Date.now(),
-
-      owned_by:
-        "nvidia-nim-proxy"
-
-    }));
+    res.json({
 
 
-  res.json({
+        object:"list",
 
-    object:
-      "list",
 
-    data:
-      models
+        data:
+        Object.keys(MODEL_MAPPING)
+        .map(model=>({
 
-  });
+
+            id:model,
+
+            object:"model",
+
+            created:
+            Date.now(),
+
+
+            owned_by:
+            "nvidia-nim-proxy"
+
+
+        }))
+
+
+    });
 
 
 });
 
 
 
+
+
+
+
 // ===============================
-// Chat Completion Proxy
+// Chat Completion
 // ===============================
+
 
 app.post(
-'/v1/chat/completions',
-async (req,res)=>{
+
+[
+
+"/v1/chat/completions",
+
+"/chat/completions",
+
+"/v1/completions"
+
+],
+
+
+async(req,res)=>{
 
 
 try {
 
 
+
 const {
 
 
-  model,
+model,
 
-  messages = [],
 
-  temperature,
+messages = [],
 
-  max_tokens,
 
-  stream
+temperature,
+
+
+max_tokens,
+
+
+stream
 
 
 } = req.body;
 
 
 
-// Prevent huge context uploads
-// Keep last 100 messages only
+
+
+// Prevent massive context
 
 const trimmedMessages =
-  messages.slice(-100);
+messages.slice(-100);
+
+
 
 
 
 const nimModel =
 
-  MODEL_MAPPING[model]
+MODEL_MAPPING[model]
 
-  ||
+||
 
-  "deepseek-ai/deepseek-v4-pro";
+"deepseek-ai/deepseek-v4-pro";
 
 
 
@@ -212,43 +261,45 @@ const nimModel =
 const nimRequest = {
 
 
-  model:
+    model:
     nimModel,
 
 
-  messages:
+    messages:
     trimmedMessages,
 
 
-  temperature:
+    temperature:
     temperature ?? 0.6,
 
 
-  max_tokens:
+    max_tokens:
     max_tokens ?? 4096,
 
 
-  stream:
+    stream:
     stream ?? false,
 
 
 
-  extra_body:
+    extra_body:
 
     ENABLE_THINKING_MODE
 
     ?
 
+
     {
 
-      chat_template_kwargs: {
+        chat_template_kwargs: {
 
-        thinking:
-          true
+            thinking:true
 
-      }
+        }
+
 
     }
+
 
     :
 
@@ -261,48 +312,69 @@ const nimRequest = {
 
 
 
+
+console.log(
+
+"Sending request to NVIDIA:",
+
+JSON.stringify({
+
+model:nimModel,
+
+messages:
+trimmedMessages.length
+
+})
+
+);
+
+
+
+
+
 const response = await axios.post(
 
 
-  `${NIM_API_BASE}/chat/completions`,
+`${NIM_API_BASE}/chat/completions`,
 
 
-  nimRequest,
+nimRequest,
+
+{
 
 
-  {
+headers:{
 
 
-    headers: {
+"Authorization":
+
+`Bearer ${NIM_API_KEY}`,
 
 
-      "Authorization":
+"Content-Type":
 
-        `Bearer ${NIM_API_KEY}`,
-
-
-      "Content-Type":
-
-        "application/json"
+"application/json"
 
 
-    },
+},
 
 
-    responseType:
 
-      stream
+responseType:
 
-      ?
+stream
 
-      "stream"
+?
 
-      :
+"stream"
 
-      "json"
+:
+
+"json"
 
 
-  }
+}
+
 
 
 );
@@ -311,98 +383,119 @@ const response = await axios.post(
 
 
 
+
+
+
+
 // ===============================
-// Streaming response
+// Streaming
 // ===============================
+
 
 if(stream){
 
 
-  res.setHeader(
 
-    "Content-Type",
+res.setHeader(
 
-    "text/event-stream"
+"Content-Type",
 
-  );
+"text/event-stream"
 
-
-  res.setHeader(
-
-    "Cache-Control",
-
-    "no-cache"
-
-  );
+);
 
 
-  res.setHeader(
+res.setHeader(
 
-    "Connection",
+"Cache-Control",
 
-    "keep-alive"
+"no-cache"
 
-  );
+);
 
 
-  res.flushHeaders();
+res.setHeader(
+
+"Connection",
+
+"keep-alive"
+
+);
 
 
 
-  response.data.on(
-    "data",
-    chunk=>{
-
-
-      let text =
-        chunk.toString();
+res.flushHeaders();
 
 
 
-      if(!SHOW_REASONING){
 
 
-        text =
-        text.replace(
+response.data.on(
 
-          /"reasoning_content":"[^"]*"/g,
+"data",
 
-          ""
-
-        );
+(chunk)=>{
 
 
-      }
+let text =
+chunk.toString();
 
 
 
-      res.write(text);
+if(!SHOW_REASONING){
 
 
-    }
+text =
+text.replace(
 
-  );
+/"reasoning_content":"[^"]*"/g,
 
+""
 
-
-  response.data.on(
-
-    "end",
-
-    ()=>{
-
-      res.end();
-
-    }
-
-  );
-
-
-
-  return;
+);
 
 
 }
+
+
+
+res.write(text);
+
+
+
+}
+
+
+
+);
+
+
+
+
+
+response.data.on(
+
+"end",
+
+()=>{
+
+res.end();
+
+}
+
+);
+
+
+
+return;
+
+
+}
+
+
+
+
+
 
 
 
@@ -412,16 +505,18 @@ if(stream){
 // ===============================
 
 
+
 const choice =
 
-  response.data
-  .choices?.[0];
+response.data
+.choices?.[0];
+
 
 
 
 let content =
 
-  choice?.message?.content || "";
+choice?.message?.content || "";
 
 
 
@@ -429,9 +524,9 @@ let content =
 
 if(
 
- SHOW_REASONING &&
+SHOW_REASONING &&
 
- choice?.message?.reasoning_content
+choice?.message?.reasoning_content
 
 ){
 
@@ -457,63 +552,67 @@ content;
 res.json({
 
 
-  id:
 
-    `chatcmpl-${Date.now()}`,
+id:
 
-
-
-  object:
-
-    "chat.completion",
+`chatcmpl-${Date.now()}`,
 
 
 
-  created:
+object:
 
-    Math.floor(Date.now()/1000),
-
-
-
-  model:
-
-    model,
+"chat.completion",
 
 
 
-  choices:[{
+created:
 
-
-    index:
-
-      0,
-
-
-    message:{
-
-
-      role:
-
-        "assistant",
-
-
-      content
-
-    },
-
-
-    finish_reason:
-
-      choice?.finish_reason || "stop"
-
-
-  }],
+Math.floor(Date.now()/1000),
 
 
 
-  usage:
+model:
 
-    response.data.usage || {}
+
+
+model,
+
+
+
+choices:[{
+
+
+index:0,
+
+
+message:{
+
+
+role:"assistant",
+
+
+content
+
+
+},
+
+
+
+finish_reason:
+
+
+choice?.finish_reason || "stop"
+
+
+}],
+
+
+
+
+usage:
+
+response.data.usage || {}
+
 
 
 
@@ -522,7 +621,11 @@ res.json({
 
 
 
+
+
+
 }
+
 
 
 catch(error){
@@ -531,11 +634,11 @@ catch(error){
 
 console.error(
 
-  "Proxy error:",
+"NVIDIA ERROR:",
 
-  error.response?.data ||
+error.response?.data ||
 
-  error.message
+error.message
 
 );
 
@@ -544,9 +647,7 @@ console.error(
 
 res.status(
 
-  error.response?.status ||
-
-  500
+error.response?.status || 500
 
 )
 
@@ -578,53 +679,94 @@ type:
 }
 
 
-});
+
+}
+
+);
+
+
+
+
+
+
 
 
 
 // ===============================
-// Unknown routes
+// Debug unknown routes
 // ===============================
+
 
 app.all("*",(req,res)=>{
 
 
+console.log(
+
+"UNKNOWN ROUTE:",
+
+req.method,
+
+req.originalUrl
+
+);
+
+
+
 res.status(404).json({
+
 
 error:{
 
+
 message:
-"Endpoint not found",
+
+`Endpoint not found: ${req.method} ${req.originalUrl}`,
+
+
 
 type:
+
 "invalid_request_error"
+
+
 
 }
 
-});
-
 
 });
 
 
 
+});
+
+
+
+
+
+
+
+
+
 // ===============================
-// Start server
+// Start
 // ===============================
+
 
 app.listen(PORT,()=>{
 
 
 console.log(
 
-`NVIDIA NIM DeepSeek Proxy running on port ${PORT}`
+`Proxy running on port ${PORT}`
 
 );
 
 
 console.log(
 
-"Model: deepseek-ai/deepseek-v4-pro"
+"NVIDIA Base:",
+
+NIM_API_BASE
 
 );
 
