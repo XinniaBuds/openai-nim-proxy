@@ -1,117 +1,318 @@
-import express from "express";
-import dotenv from "dotenv";
+// server.js - OpenAI to NVIDIA NIM API Proxy (DeepSeek NIM)
 
-dotenv.config();
+const express = require('express');
+const cors = require('cors');
+const axios = require('axios');
 
 const app = express();
-
-app.use(express.json({ limit: "10mb" }));
-
 const PORT = process.env.PORT || 3000;
 
-const NVIDIA_API_KEY = process.env.NVIDIA_API_KEY;
 
-// Hosted NVIDIA API
-const NVIDIA_BASE_URL = "https://integrate.api.nvidia.com/v1";
+// Middleware
+app.use(cors());
+app.use(express.json());
 
-const DEFAULT_MODEL = "deepseek-ai/deepseek-v4-pro";
 
-console.log("API key loaded:", !!NVIDIA_API_KEY);
+// NVIDIA NIM API configuration
+const NIM_API_BASE =
+  process.env.NIM_API_BASE || 'https://integrate.api.nvidia.com/v1';
 
-app.get("/health", (_, res) => {
+const NIM_API_KEY = process.env.NIM_API_KEY;
+
+
+// DeepSeek settings
+const SHOW_REASONING = false;
+const ENABLE_THINKING_MODE = true;
+
+
+// Model mapping
+const MODEL_MAPPING = {
+  "deepseek-v4-pro": "deepseek-ai/deepseek-v4-pro",
+  "gpt-4o": "deepseek-ai/deepseek-v4-pro"
+};
+
+
+// Health check
+app.get('/health', (req, res) => {
   res.json({
     status: "ok",
-    apiKeyLoaded: !!NVIDIA_API_KEY
+    service: "OpenAI to NVIDIA NIM Proxy",
+    model: "deepseek-ai/deepseek-v4-pro",
+    reasoning_display: SHOW_REASONING,
+    thinking_mode: ENABLE_THINKING_MODE
   });
 });
 
-app.get("/v1/models", (_, res) => {
+
+// OpenAI compatible model list
+app.get('/v1/models', (req, res) => {
+
+  const models = Object.keys(MODEL_MAPPING).map(model => ({
+    id: model,
+    object: "model",
+    created: Date.now(),
+    owned_by: "nvidia-nim-proxy"
+  }));
+
   res.json({
     object: "list",
-    data: [
-      {
-        id: DEFAULT_MODEL,
-        object: "model",
-        owned_by: "nvidia"
-      }
-    ]
+    data: models
   });
+
 });
 
-app.get("/test", async (_, res) => {
+
+// Chat completion endpoint
+app.post('/v1/chat/completions', async (req, res) => {
+
   try {
-    const response = await fetch(
-      `${NVIDIA_BASE_URL}/models`,
-      {
-        headers: {
-          Authorization: `Bearer ${NVIDIA_API_KEY}`
-        }
-      }
-    );
 
-    const text = await response.text();
+    const {
+      model,
+      messages,
+      temperature,
+      max_tokens,
+      stream
+    } = req.body;
 
-    console.log("TEST STATUS:", response.status);
-    console.log("TEST RESPONSE:", text);
 
-    res.status(response.status).send(text);
-  } catch (error) {
-    console.error(error);
+    const nimModel =
+      MODEL_MAPPING[model] ||
+      "deepseek-ai/deepseek-v4-pro";
 
-    res.status(500).json({
-      error: error.message
-    });
-  }
-});
 
-app.post("/v1/chat/completions", async (req, res) => {
-  try {
-    const body = req.body;
+    const nimRequest = {
 
-    const payload = {
-      model: body.model || DEFAULT_MODEL,
-      messages: body.messages,
-      temperature: body.temperature,
-      max_tokens: body.max_tokens,
-      stream: false
+      model: nimModel,
+
+      messages,
+
+      temperature: temperature ?? 0.6,
+
+      max_tokens: max_tokens ?? 16384,
+
+      stream: stream ?? false,
+
+      extra_body: ENABLE_THINKING_MODE
+        ? {
+            chat_template_kwargs: {
+              thinking: true
+            }
+          }
+        : undefined
+
     };
 
-    console.log("REQUEST MODEL:", payload.model);
 
-    const response = await fetch(
-      `${NVIDIA_BASE_URL}/chat/completions`,
+    const response = await axios.post(
+
+      `${NIM_API_BASE}/chat/completions`,
+
+      nimRequest,
+
       {
-        method: "POST",
+
         headers: {
-          Authorization: `Bearer ${NVIDIA_API_KEY}`,
+
+          "Authorization": `Bearer ${NIM_API_KEY}`,
+
           "Content-Type": "application/json"
+
         },
-        body: JSON.stringify(payload)
+
+        responseType: stream ? "stream" : "json"
+
       }
+
     );
 
-    const text = await response.text();
 
-    console.log("NVIDIA STATUS:", response.status);
-    console.log("NVIDIA RESPONSE:", text);
 
-    try {
-      const data = JSON.parse(text);
-      return res.status(response.status).json(data);
-    } catch {
-      return res.status(response.status).send(text);
+    // Streaming response
+
+    if (stream) {
+
+
+      res.setHeader(
+        "Content-Type",
+        "text/event-stream"
+      );
+
+      res.setHeader(
+        "Cache-Control",
+        "no-cache"
+      );
+
+
+      response.data.on(
+        "data",
+        chunk => {
+
+          let text = chunk.toString();
+
+
+          if (!SHOW_REASONING) {
+
+            text = text.replace(
+              /"reasoning_content":"[^"]*"/g,
+              ''
+            );
+
+          }
+
+
+          res.write(text);
+
+        }
+
+      );
+
+
+      response.data.on(
+        "end",
+        () => res.end()
+      );
+
+
+      return;
+
     }
-  } catch (error) {
-    console.error("SERVER ERROR:", error);
 
-    return res.status(500).json({
-      error: {
-        message: error.message
-      }
+
+
+    // Normal response
+
+    const choice =
+      response.data.choices?.[0];
+
+
+    let content =
+      choice?.message?.content || "";
+
+
+
+    if (
+      SHOW_REASONING &&
+      choice?.message?.reasoning_content
+    ) {
+
+      content =
+        "<think>\n" +
+        choice.message.reasoning_content +
+        "\n</think>\n\n" +
+        content;
+
+    }
+
+
+
+    res.json({
+
+      id: `chatcmpl-${Date.now()}`,
+
+      object: "chat.completion",
+
+      created: Math.floor(Date.now() / 1000),
+
+      model: model,
+
+
+      choices: [
+
+        {
+
+          index: 0,
+
+          message: {
+
+            role: "assistant",
+
+            content
+
+          },
+
+          finish_reason:
+            choice?.finish_reason || "stop"
+
+        }
+
+      ],
+
+
+      usage:
+        response.data.usage || {}
+
     });
+
+
   }
+
+
+  catch(error) {
+
+
+    console.error(
+      "Proxy error:",
+      error.response?.data || error.message
+    );
+
+
+    res.status(
+      error.response?.status || 500
+    ).json({
+
+      error: {
+
+        message:
+          error.response?.data ||
+          error.message,
+
+        type:
+          "invalid_request_error"
+
+      }
+
+    });
+
+
+  }
+
 });
 
-app.listen(PORT, () => {
-  console.log(`Listening on ${PORT}`);
+
+
+// Unknown routes
+
+app.all("*", (req,res)=>{
+
+  res.status(404).json({
+
+    error: {
+
+      message:
+        "Endpoint not found",
+
+      type:
+        "invalid_request_error"
+
+    }
+
+  });
+
+});
+
+
+
+// Start server
+
+app.listen(PORT, ()=>{
+
+  console.log(
+    `NVIDIA NIM DeepSeek Proxy running on port ${PORT}`
+  );
+
+  console.log(
+    `Model: deepseek-ai/deepseek-v4-pro`
+  );
+
 });
