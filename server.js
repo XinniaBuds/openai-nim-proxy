@@ -88,7 +88,7 @@ process.env.NIM_API_KEY;
 const SHOW_REASONING = false;
 
 
-const ENABLE_THINKING_MODE = true;
+const ENABLE_THINKING_MODE = false;
 
 
 
@@ -240,7 +240,7 @@ stream
 // Prevent massive context
 
 const trimmedMessages =
-messages.slice(-100);
+messages.slice(-25);
 
 
 
@@ -274,7 +274,7 @@ const nimRequest = {
 
 
     max_tokens:
-    max_tokens ?? 4096,
+    max_tokens ?? 1024,
 
 
     stream:
@@ -314,77 +314,37 @@ const nimRequest = {
 
 
 console.log(
-
 "Sending request to NVIDIA:",
-
 JSON.stringify({
-
 model:nimModel,
-
-messages:
-trimmedMessages.length
-
+messages:trimmedMessages.length
 })
-
 );
 
-
-
-
+console.log("Before NVIDIA call");
 
 const response = await axios.post(
-
-
-`${NIM_API_BASE}/chat/completions`,
-
-
-nimRequest,
-
-{
-
-
-headers:{
-
-
-"Authorization":
-
-`Bearer ${NIM_API_KEY}`,
-
-
-"Content-Type":
-
-"application/json"
-
-
-},
-
-
-
-responseType:
-
-stream
-
-?
-
-"stream"
-
-:
-
-"json"
-
-
-}
-
-
-
+  `${NIM_API_BASE}/chat/completions`,
+  nimRequest,
+  {
+    timeout: 120000,
+    headers:{
+      "Authorization":
+      `Bearer ${NIM_API_KEY}`,
+      "Content-Type":
+      "application/json"
+    },
+    responseType:
+    stream
+    ?
+    "stream"
+    :
+    "json"
+  }
 );
 
-
-
-
-
-
-
+console.log("After NVIDIA call");
+console.log("Status:", response.status);
 
 
 // ===============================
@@ -653,53 +613,8 @@ catch (error) {
   });
 }
 
-
-
-
-res.status(
-
-error.response?.status || 500
-
-)
-
-.json({
-
-
-error:{
-
-
-message:
-
-error.response?.data ||
-
-error.message,
-
-
-type:
-
-"invalid_request_error"
-
-
 }
-
-
-});
-
-
-
-}
-
-
-
-}
-
 );
-
-
-
-
-
-
 
 
 
