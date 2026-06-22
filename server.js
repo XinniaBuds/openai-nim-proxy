@@ -628,19 +628,30 @@ response.data.usage || {}
 
 
 
-catch(error){
+catch (error) {
 
+  console.error("NVIDIA ERROR");
 
+  console.error("Status:",
+    error.response?.status);
 
-console.error(
+  console.error("Data:",
+    error.response?.data);
 
-"NVIDIA ERROR:",
+  console.error("Message:",
+    error.message);
 
-error.response?.data ||
-
-error.message
-
-);
+  return res.status(
+    error.response?.status || 500
+  ).json({
+    error: {
+      message:
+        error.message,
+      status:
+        error.response?.status
+    }
+  });
+}
 
 
 
